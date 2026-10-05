@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+
+import yt_dlp
+import sys
+from pathlib import Path
+import os
+import re
+
+def extract_album_info(url):
+    songs = []
+
+    ydl_opts = {
+        'extract_flat': False,
+        'ignoreerrors': True
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        playlist_dict = ydl.extract_info(url, download=False)
+        
+        album_metadata = {
+            'title': playlist_dict.get('title'),
+            'artist': "",
+            'tracks': []
+        }
+        
+        if 'entries' in playlist_dict:
+            for index, video in enumerate(playlist_dict['entries'], start=1):
+                if not video:
+                    continue
+                    
+                if album_metadata["artist"] == "":
+                    album_metadata['artist'] = video.get('artist') or video.get('uploader') or video.get('creator') # ugly ass fix
+                    album_metadata['artist'] = album_metadata['artist'].split(",")[0]
+                
+                album_metadata['tracks'].append({
+                    "title": video.get('title'),
+                    "url": video.get('url') or f"https://youtube.com/watch?v={video.get('id')}"
+                })
+    
+    return album_metadata
+    
+def download_mp3(url, path, track_name):
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        
+        'outtmpl': f'{path}/{track_name}.%(ext)s',
+
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+def main():
+    filename = sys.argv[1]
+    
+    with open(filename, 'r') as file:
+        for line in file:
+            url = line.rstrip('\n')
+            album_info = extract_album_info(url)
+            
+            folder = Path(f"output/{album_info.get('artist')}/{album_info.get('title')}")
+            
+            folder.mkdir(parents=True, exist_ok=True)
+
+            for track in album_info.get('tracks'):
+                track_name = track.get('title')
+                
+                # clean up name because i don't want it being weird
+                track_name = track_name.replace(f"{album_info.get('artist')} - ", "")
+                track_name = re.sub(r'\(?ft\.[^)]*\)?', '', track_name)
+                track_name = track_name.strip()
+                
+                download_mp3(track.get('url'), folder, track_name)
+
+if len(sys.argv) < 2:
+    print("Usage: song-dl songs.txt")
+    sys.exit(1)
+
+main()
